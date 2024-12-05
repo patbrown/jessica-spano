@@ -53,7 +53,9 @@
 
 ;; ### OPTIONALITY SPECS
 (s/def ::?-or-nil (s/or ::? ::? ::nil ::nil))
-(s/def ::atom-kw-str-or-vec (s/or ::atom ::atom ::map ::map ::vec ::vec))
+(s/def ::atom-kw-or-str (s/or ::atom ::atom ::kw ::kw ::str ::str))
+(s/def ::atom-kw-str-or-vec (s/or ::atom ::atom ::kw ::kw ::str ::str ::vec ::vec))
+(s/def ::atom-kw-map-or-str (s/or ::atom ::atom ::kw ::kw ::map ::map ::str ::str))
 (s/def ::atom-map-or-vec (s/or ::atom ::atom ::map ::map ::vec ::vec))
 (s/def ::atom-or-fn (s/or ::atom ::atom ::fn ::fn))
 (s/def ::atom-or-map (s/or ::atom ::atom ::map ::map))
@@ -70,6 +72,7 @@
 (s/def ::fn-or-vec (s/or ::fn ::fn ::vec ::vec))
 (s/def ::fn-qkw-or-str (s/or ::qkw ::qkw ::str ::str ::fn ::fn))
 (s/def ::kw-map-or-vec (s/or ::vec ::vec ::map ::map ::kw ::kw))
+(s/def ::kw-map-or-str (s/or ::str ::str ::map ::map ::kw ::kw))
 (s/def ::kw-map-set-or-vec (s/or ::kw ::kw ::map ::map ::set ::set ::vec ::vec))
 (s/def ::kw-map-str-or-vec (s/or ::kw ::kw ::map ::map ::str ::str ::vec ::vec))
 (s/def ::kw-nil-or-str (s/or ::kw ::kw ::nil ::nil ::str ::str))
@@ -333,7 +336,6 @@
   []
   (rand-str 64))
 
-
 (defn-spec rand-of ::str
   "Returns a random category member.   
    Can be provided category keyword ':nato-alphabet' "
@@ -343,8 +345,9 @@
      (when category
        (rand-nth (vec category))))))
 
-(def rando-counts-map (medley.core/map-kv (fn [k v]
+(def rand-of-counts-map (medley.core/map-kv (fn [k v]
                                       [k (count v)]) no-rando))
+
 ;; END RANDOM
 
 
@@ -391,18 +394,19 @@
     ::vec (mapv rm-kw-ns thing)
     :else thing))
 
-(defn-spec inside-of-prefix ::any
-  "Takes a prefix and returns a function that adds that prefix to a thing or things DWIM style."
-  [prefix ::kw-or-str]
-  (fn [kw-or-str]
-    (let [prefix (name prefix)]
-      (cond
-        (qualified-keyword? kw-or-str) (keyword (str prefix "." (namespace kw-or-str)) (name kw-or-str))
-        (keyword? kw-or-str) (keyword prefix (name kw-or-str))
-        (string? kw-or-str) (keyword prefix kw-or-str)
-        (map? kw-or-str) (add-kw-ns prefix kw-or-str)
-        (vector? kw-or-str) (map prefix kw-or-str)
-        :else nil))))
+
+(defn-spec qkw->relative-path ::str
+  [qkw ::qkw]
+  (clojure.string/replace (str (namespace qkw) "/"
+                               (name qkw)) #"\." "/"))
+
+(defn-spec if-atom-deref ::any
+  [thing ::any]
+  (if (atom? thing)
+    (deref thing)
+    thing))
+
+
 ;; END VALUETYPE FNS
 
 ;; ### BASIS
@@ -851,15 +855,6 @@
   (pyramid.core/add m items))
 (defmethod *normalize-as :as-instances [_ m items]
   (pyramid.core/add m (entity-as-instance items)))
-(defmethod *normalize-as :dt-id-map [_ m {:keys [dt instances]}]
-  (let [stuff (vec (vals (medley.core/map-kv
-                          (fn [k v]
-                            [k {dt k
-                                (keyword (namespace dt) (namespace dt)) v}])
-                          instances)))]
-    stuff
-    (reduce medley.core/deep-merge (map #(pyramid.core/add m %) stuff))))
-
 (defmethod *normalize-as :add-all-vts [_ m]
   (let [vts (let [vts (set (filter #(= "vt" (namespace %)) (keys (s/registry))))]
               (apply merge (map (fn [s] {s {::id s
@@ -890,8 +885,6 @@
 (defmethod *add :as-instances
   [variant m items] (add-normalized-boilerplate variant m items))
 (defmethod *add :overlay
-  [variant m items] (add-normalized-boilerplate variant m items))
-(defmethod *add :dt-id-map
   [variant m items] (add-normalized-boilerplate variant m items))
 (defmethod *add :add-all-vts
   [variant m] (add-normalized-boilerplate variant m nil))
@@ -934,28 +927,11 @@
   (let [id-kw (keyword (namespace id) "id")]
     (ident->default-value m [id-kw id])))
 
-(defn-spec return-map-and-ident ::vec-of-2
-  "Given an atom or a map and another map or ident or id keyword returns m and ident.
-   i.e. [{} [:a/id :a/cool]]"
-  [m ::atom-or-map ident ::ident-map-or-qkw]
-  (case (baby.pat.vt/vt-dispatch ident)
-    ::map [(add m ident) ident]
-    ::vec [m ident]
-    ::qkw [m [(keyword (namespace ident) "id") ident]]
-    nil))
-
 (defn-spec call-fn-from-ident ::fn-or-kw
   "Calls a function located at the ident."
   [m ::atom-or-map ident ::ident]
   (let [f (ident->default-value m ident)]
     (f)))
-
-(defn-spec call-fn-from-ident-on-map ::any
-  "Calls a function located at the ident on the map provided."
-  [m ::atom-or-map ident ::ident]
-  (let [f (ident->default-value m ident)]
-    (f m)))
-
 
 (defn-spec access ::any
   "Access an atom or map via an instructions map."
